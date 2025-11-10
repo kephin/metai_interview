@@ -1,9 +1,8 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings
-import os
-
-from routers import auth
+from routers import auth, files
 
 settings = get_settings()
 
@@ -25,9 +24,16 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+def root():
+    return {"message": "File Management API", "status": "running"}
+
+
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "environment": settings}
 
 
+# Register routers
 app.include_router(auth.router)
+app.include_router(files.router)

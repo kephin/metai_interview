@@ -64,9 +64,6 @@ async def login(
 )
 async def logout(current_user: User = Depends(get_current_user)) -> LogoutResponse:
     try:
-        # Note: Token validation happens via get_current_user dependency
-        # For MVP, we return success as token will expire naturally (30 min)
-        # Client-side will clear localStorage token
         result = {"message": "Successfully logged out"}
 
         return LogoutResponse(

@@ -86,6 +86,10 @@ export class ApiClient {
       throw await this.handleError(response);
     }
 
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
     return response.json();
   }
 

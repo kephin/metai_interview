@@ -1,13 +1,8 @@
 from functools import lru_cache
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
-import os
 
-environment = os.getenv("ENVIRONMENT", "development")
-if environment == "production":
-    load_dotenv(dotenv_path=".env.production")
-else:
-    load_dotenv(dotenv_path=".env.development")
+load_dotenv()
 
 
 class Settings(BaseSettings):

@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import get_settings
 import os
 
+from routers import auth
+
 settings = get_settings()
 
 app = FastAPI(
@@ -14,7 +16,6 @@ app = FastAPI(
 # Configure CORS
 allowed_origins_str = os.getenv("CORS_ORIGINS", "").split(",")
 allowed_origins = [origin.strip() for origin in allowed_origins_str if origin.strip()]
-print(allowed_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -24,11 +25,9 @@ app.add_middleware(
 )
 
 
-@app.get("/")
-def root():
-    return {"message": "File Management API", "status": "running"}
-
-
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "environment": settings}
+
+
+app.include_router(auth.router)

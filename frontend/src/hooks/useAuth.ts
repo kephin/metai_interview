@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { useState, useCallback } from "react";
 import { apiClient } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import type {
@@ -13,6 +14,10 @@ import type {
 import { QUERY_STALE_TIMES } from "@/lib/queryClient";
 
 const AUTH_QUERY_KEY = ["auth", "currentUser"];
+
+// Global state for active operations tracking
+let globalActiveDownloads = 0;
+const globalDownloadListeners: Array<() => void> = [];
 
 async function getCurrentUser(): Promise<User | null> {
   try {
@@ -56,14 +61,12 @@ async function signup(credentials: SignupRequest): Promise<AuthResponse> {
 }
 
 async function login(credentials: LoginRequest): Promise<AuthResponse> {
-  console.log("[useAuth] Attempting login...");
   const response = await apiClient.post<AuthResponse>(
     "/auth/login",
     credentials
   );
 
   if (response.success && response.data) {
-    console.log("[useAuth] Login successful, setting session...");
     const { error } = await supabase.auth.setSession({
       access_token: response.data.access_token,
       refresh_token: response.data.access_token, // Use access_token as refresh_token for MVP
@@ -73,14 +76,7 @@ async function login(credentials: LoginRequest): Promise<AuthResponse> {
       console.error("[useAuth] Failed to set session:", error);
       throw new Error("Failed to establish session");
     }
-
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    console.log(
-      "[useAuth] Session set successfully, token present:",
-      !!session?.access_token
-    );
+    await supabase.auth.getSession();
   } else {
     console.error("[useAuth] Login failed:", response.error);
   }
@@ -99,6 +95,7 @@ async function logout(): Promise<LogoutResponse> {
 export function useAuth() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const [activeDownloads, setActiveDownloads] = useState(0);
 
   const {
     data: user,
@@ -141,26 +138,41 @@ export function useAuth() {
     },
   });
 
+  // Subscribe to global download state changes
+  const notifyDownloadChange = useCallback(() => {
+    setActiveDownloads(globalActiveDownloads);
+  }, []);
+  globalDownloadListeners.push(notifyDownloadChange);
+
   return {
     // User data
     user,
     isLoading,
     isAuthenticated: !!user,
-
     // Mutations
     signup: signupMutation.mutateAsync,
     login: loginMutation.mutateAsync,
     logout: logoutMutation.mutateAsync,
-
     // Mutation states
     isSigningUp: signupMutation.isPending,
     isLoggingIn: loginMutation.isPending,
     isLoggingOut: logoutMutation.isPending,
-
     // Error handling
     signupError: signupMutation.error,
     loginError: loginMutation.error,
     logoutError: logoutMutation.error,
     queryError,
+    // Active operations tracking
+    activeDownloads,
   };
+}
+
+export function incrementActiveDownloads() {
+  globalActiveDownloads++;
+  globalDownloadListeners.forEach((listener) => listener());
+}
+
+export function decrementActiveDownloads() {
+  globalActiveDownloads = Math.max(0, globalActiveDownloads - 1);
+  globalDownloadListeners.forEach((listener) => listener());
 }

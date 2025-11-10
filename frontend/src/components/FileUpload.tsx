@@ -6,11 +6,13 @@ import { type FileMetadata, MAX_FILE_SIZE } from "@/types/file";
 import { validateFile } from "@/lib/validators";
 
 export interface FileUploadProps {
+  onUploadStart?: () => void;
   onUploadSuccess?: (file: FileMetadata) => void;
   onUploadError?: (error: Error) => void;
 }
 
 export function FileUpload({
+  onUploadStart,
   onUploadSuccess,
   onUploadError,
 }: FileUploadProps) {
@@ -52,10 +54,12 @@ export function FileUpload({
         setDuplicateFile(existing);
         setShowDuplicateDialog(true);
       } else {
+        onUploadStart?.();
         await upload(file);
       }
     } catch {
       // If duplicate check fails, proceed with upload anyway
+      onUploadStart?.();
       await upload(file);
     }
   };
@@ -65,6 +69,7 @@ export function FileUpload({
 
     setShowDuplicateDialog(false);
     setDuplicateFile(null);
+    onUploadStart?.();
     await upload(selectedFile);
   };
 

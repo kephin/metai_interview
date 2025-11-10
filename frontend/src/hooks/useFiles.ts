@@ -7,6 +7,10 @@ import type {
 } from "@/types/file";
 import { apiClient } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
+import { incrementActiveDownloads, decrementActiveDownloads } from "./useAuth";
+
+// Global map to track active download abort controllers
+const activeDownloadControllers = new Map<string, AbortController>();
 
 export interface UseFilesOptions {
   page?: number;
@@ -60,36 +64,47 @@ export function useDeleteFile() {
 export function useDownloadFile() {
   return useMutation({
     mutationFn: async (fileId: string): Promise<void> => {
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const abortController = new AbortController();
+      activeDownloadControllers.set(fileId, abortController);
 
-      const response = await fetch(`${API_URL}/files/${fileId}/download`, {
-        method: "GET",
-        headers: {
-          Authorization: session?.access_token
-            ? `Bearer ${session.access_token}`
-            : "",
-        },
-        redirect: "follow",
-      });
+      incrementActiveDownloads();
 
-      if (!response.ok) {
-        throw new Error(`Download failed: ${response.statusText}`);
+      try {
+        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const response = await fetch(`${API_URL}/files/${fileId}/download`, {
+          method: "GET",
+          headers: {
+            Authorization: session?.access_token
+              ? `Bearer ${session.access_token}`
+              : "",
+          },
+          redirect: "follow",
+          signal: abortController.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Download failed: ${response.statusText}`);
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        window.URL.revokeObjectURL(url);
+      } finally {
+        activeDownloadControllers.delete(fileId);
+        decrementActiveDownloads();
       }
-
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      window.URL.revokeObjectURL(url);
     },
     onError: (error: Error) => {
       console.error("Error downloading file:", error);
@@ -98,12 +113,19 @@ export function useDownloadFile() {
   });
 }
 
+export function cancelAllActiveDownloads() {
+  activeDownloadControllers.forEach((controller) => {
+    controller.abort();
+  });
+  activeDownloadControllers.clear();
+}
+
 export function useCheckDuplicateFilename() {
   return useMutation({
     mutationFn: async (filename: string): Promise<FileMetadata | null> => {
       try {
         const response = await apiClient.get<FileListResponse>(
-          "/files?page=1&page_size=1000"
+          "/files?page=1&page_size=100" // Use page_size=100 (backend max)
         );
 
         const existingFile = response.files.find(

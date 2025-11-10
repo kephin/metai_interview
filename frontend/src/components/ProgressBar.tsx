@@ -1,5 +1,3 @@
-import React from "react";
-
 export interface ProgressBarProps {
   percentage: number;
   height?: number;

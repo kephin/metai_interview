@@ -10,6 +10,11 @@ import { supabase } from "../lib/supabase";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+// Global registry to track active upload cancel functions
+const activeUploadCancelFunctions = new Map<string, () => void>();
+
+let uploadIdCounter = 0;
+
 export interface UseFileUploadOptions {
   onSuccess?: (response: FileUploadResponse) => void;
   onError?: (error: Error) => void;
@@ -31,6 +36,7 @@ export function useFileUpload(
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
+  const uploadIdRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
 
   const cancel = useCallback(() => {
@@ -39,11 +45,19 @@ export function useFileUpload(
       setUploading(false);
       setError("Upload cancelled");
       setProgress(null);
+
+      if (uploadIdRef.current) {
+        activeUploadCancelFunctions.delete(uploadIdRef.current);
+        uploadIdRef.current = null;
+      }
     }
   }, []);
 
   const upload = useCallback(
     async (file: File): Promise<FileUploadResponse> => {
+      const uploadId = `upload-${++uploadIdCounter}`;
+      uploadIdRef.current = uploadId;
+
       setUploading(true);
       setError(null);
       setProgress({
@@ -60,6 +74,8 @@ export function useFileUpload(
         const errorMsg = validation.error || "File validation failed";
         setError(errorMsg);
         setUploading(false);
+        activeUploadCancelFunctions.delete(uploadId);
+        uploadIdRef.current = null;
         options.onError?.(new Error(errorMsg));
         throw new Error(errorMsg);
       }
@@ -67,6 +83,9 @@ export function useFileUpload(
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhrRef.current = xhr;
+
+        // Register this upload's cancel function
+        activeUploadCancelFunctions.set(uploadId, cancel);
 
         // Track upload progress
         xhr.upload.addEventListener("progress", (e) => {
@@ -101,6 +120,10 @@ export function useFileUpload(
 
               queryClient.invalidateQueries({ queryKey: ["files"] });
               setUploading(false);
+
+              activeUploadCancelFunctions.delete(uploadId);
+              uploadIdRef.current = null;
+
               options.onSuccess?.(response);
               resolve(response);
             } catch {
@@ -115,6 +138,10 @@ export function useFileUpload(
                 status: "failed" as UploadStatus,
                 error: errorMsg,
               });
+
+              activeUploadCancelFunctions.delete(uploadId);
+              uploadIdRef.current = null;
+
               const err = new Error(errorMsg);
               options.onError?.(err);
               reject(err);
@@ -136,6 +163,10 @@ export function useFileUpload(
               status: "failed" as UploadStatus,
               error: errorMsg,
             });
+
+            activeUploadCancelFunctions.delete(uploadId);
+            uploadIdRef.current = null;
+
             const err = new Error(errorMsg);
             options.onError?.(err);
             reject(err);
@@ -155,6 +186,10 @@ export function useFileUpload(
             status: "failed" as UploadStatus,
             error: errorMsg,
           });
+
+          activeUploadCancelFunctions.delete(uploadId);
+          uploadIdRef.current = null;
+
           const err = new Error(errorMsg);
           options.onError?.(err);
           reject(err);
@@ -166,6 +201,10 @@ export function useFileUpload(
           setError(errorMsg);
           setUploading(false);
           setProgress(null);
+
+          activeUploadCancelFunctions.delete(uploadId);
+          uploadIdRef.current = null;
+
           const err = new Error(errorMsg);
           options.onError?.(err);
           reject(err);
@@ -204,4 +243,11 @@ export function useFileUpload(
     error,
     cancel,
   };
+}
+
+export function cancelAllActiveUploads() {
+  activeUploadCancelFunctions.forEach((cancelFn) => {
+    cancelFn();
+  });
+  activeUploadCancelFunctions.clear();
 }

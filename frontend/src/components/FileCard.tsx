@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   type FileMetadata,
   formatFileSize,
@@ -16,6 +16,7 @@ export interface FileCardProps {
 
 export function FileCard({ file, onDeleted }: FileCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const deleteFile = useDeleteFile();
   const downloadFile = useDownloadFile();
 
@@ -29,8 +30,17 @@ export function FileCard({ file, onDeleted }: FileCardProps) {
     }
   };
 
-  const handleDownload = () => {
-    downloadFile.mutateAsync(file.id);
+  const handleDownload = async () => {
+    setDownloadError(null);
+    try {
+      await downloadFile.mutateAsync(file.id);
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to download file. Please try again.";
+      setDownloadError(errorMessage);
+    }
   };
 
   const showImage = isImageFile(file.filename);
@@ -96,6 +106,20 @@ export function FileCard({ file, onDeleted }: FileCardProps) {
             </button>
           </div>
         </div>
+
+        {downloadError && (
+          <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded">
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-sm text-red-800 flex-1">{downloadError}</p>
+              <button
+                onClick={handleDownload}
+                className="text-sm font-medium text-red-600 hover:text-red-700 whitespace-nowrap"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showDeleteConfirm && (

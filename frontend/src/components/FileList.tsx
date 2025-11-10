@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { FileCard } from "./FileCard";
 import { useFiles } from "../hooks/useFiles";
 import { usePagination, getPageRangeText } from "../hooks/usePagination";

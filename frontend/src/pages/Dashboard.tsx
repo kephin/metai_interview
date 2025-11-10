@@ -2,21 +2,26 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { FileUpload } from "@/components/FileUpload";
 import { FileList } from "@/components/FileList";
+import { cancelAllActiveDownloads } from "@/hooks/useFiles";
+import { cancelAllActiveUploads } from "@/hooks/useFileUpload";
 
 export function Dashboard() {
-  const { user, logout, isLoggingOut } = useAuth();
+  const { user, logout, isLoggingOut, activeDownloads } = useAuth();
   const [activeUploads, setActiveUploads] = useState(0);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [fileListKey, setFileListKey] = useState(0);
 
   const hasActiveUploads = activeUploads > 0;
+  const hasActiveDownloads = activeDownloads > 0;
+  const hasActiveOperations = hasActiveUploads || hasActiveDownloads;
+  const totalActiveOperations = activeUploads + activeDownloads;
 
-  // FIXME:
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasActiveUploads) {
+      if (hasActiveOperations) {
         e.preventDefault();
-        e.returnValue = "Upload in progress. Are you sure you want to leave?";
+        e.returnValue =
+          "Operations in progress. Are you sure you want to leave?";
         return e.returnValue;
       }
     };
@@ -26,10 +31,10 @@ export function Dashboard() {
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
     };
-  }, [hasActiveUploads]);
+  }, [hasActiveOperations]);
 
   const handleLogout = async () => {
-    if (hasActiveUploads) {
+    if (hasActiveOperations) {
       setShowLogoutConfirm(true);
       return;
     }
@@ -42,9 +47,15 @@ export function Dashboard() {
   };
 
   const handleConfirmLogout = async () => {
+    cancelAllActiveDownloads();
+    cancelAllActiveUploads();
     setActiveUploads(0);
     setShowLogoutConfirm(false);
     await logout();
+  };
+
+  const handleUploadStart = () => {
+    setActiveUploads((prev) => prev + 1);
   };
 
   const handleUploadSuccess = () => {
@@ -66,11 +77,19 @@ export function Dashboard() {
           </h1>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-600">{user?.email}</span>
-            {hasActiveUploads && (
-              <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                {activeUploads} upload{activeUploads !== 1 ? "s" : ""} in
-                progress
-              </span>
+            {hasActiveOperations && (
+              <div className="flex gap-2">
+                {hasActiveUploads && (
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                    {activeUploads} upload{activeUploads !== 1 ? "s" : ""}
+                  </span>
+                )}
+                {hasActiveDownloads && (
+                  <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                    {activeDownloads} download{activeDownloads !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
             )}
             <button
               onClick={handleLogout}
@@ -97,6 +116,7 @@ export function Dashboard() {
 
           <div className="flex-[0_0_30%]">
             <FileUpload
+              onUploadStart={handleUploadStart}
               onUploadSuccess={handleUploadSuccess}
               onUploadError={handleUploadError}
             />
@@ -108,13 +128,27 @@ export function Dashboard() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-lg font-semibold text-gray-900 mb-2">
-              Active Uploads in Progress
+              Active Operations in Progress
             </h2>
             <p className="text-gray-600 mb-4">
-              You have {activeUploads} file upload
-              {activeUploads !== 1 ? "s" : ""} in progress. Logging out will
-              cancel {activeUploads === 1 ? "this upload" : "these uploads"}.
-              Are you sure you want to continue?
+              You have {totalActiveOperations} active operation
+              {totalActiveOperations !== 1 ? "s" : ""} in progress
+              {hasActiveUploads && hasActiveDownloads
+                ? ` (${activeUploads} upload${
+                    activeUploads !== 1 ? "s" : ""
+                  }, ${activeDownloads} download${
+                    activeDownloads !== 1 ? "s" : ""
+                  })`
+                : hasActiveUploads
+                ? ` (${activeUploads} upload${activeUploads !== 1 ? "s" : ""})`
+                : ` (${activeDownloads} download${
+                    activeDownloads !== 1 ? "s" : ""
+                  })`}
+              . Logging out will cancel{" "}
+              {totalActiveOperations === 1
+                ? "this operation"
+                : "these operations"}
+              . Are you sure you want to continue?
             </p>
             <div className="flex gap-3 justify-end">
               <button

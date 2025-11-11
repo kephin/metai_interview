@@ -22,7 +22,6 @@ class StorageService:
                 path=file_path, file=file_data, file_options=options
             )
 
-            logger.info(f"Successfully uploaded file to {file_path}")
             return response
         except Exception as e:
             logger.error(f"Failed to upload file to {file_path}: {str(e)}")
@@ -31,7 +30,6 @@ class StorageService:
     async def delete_file(self, file_path: str) -> None:
         try:
             self.supabase.storage.from_(self.bucket_name).remove([file_path])
-            logger.info(f"Successfully deleted file at {file_path}")
         except Exception as e:
             logger.error(f"Failed to delete file at {file_path}: {str(e)}")
             raise
@@ -47,7 +45,6 @@ class StorageService:
             if isinstance(response, dict) and "signedURL" in response:
                 return response["signedURL"]
 
-            logger.error(f"Unexpected response format for signed URL: {response}")
             raise ValueError("Failed to generate signed URL")
         except Exception as e:
             logger.error(f"Failed to generate signed URL for {file_path}: {str(e)}")
@@ -63,3 +60,16 @@ class StorageService:
         except Exception as e:
             logger.error(f"Failed to check if file exists at {file_path}: {str(e)}")
             return False
+
+    async def upload_thumbnail(
+        self, user_id: str, file_id: str, thumbnail_data: bytes
+    ) -> str:
+        thumbnail_path = f"{user_id}/{file_id}/thumbnail.webp"
+
+        response = self.supabase.storage.from_(self.bucket_name).upload(
+            path=thumbnail_path,
+            file=thumbnail_data,
+            file_options={"content-type": "image/webp"},
+        )
+
+        return thumbnail_path

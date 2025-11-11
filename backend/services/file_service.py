@@ -74,10 +74,16 @@ class FileService:
             raise
 
     async def create_file_metadata(
-        self, user_id: UUID, filename: str, file_size: int, storage_path: str
+        self,
+        user_id: UUID,
+        file_id: UUID,
+        filename: str,
+        file_size: int,
+        storage_path: str,
     ) -> dict:
         try:
             file_data = {
+                "id": str(file_id),
                 "user_id": str(user_id),
                 "filename": filename,
                 "file_size": file_size,
@@ -163,7 +169,13 @@ class FileService:
             # Get paginated data
             offset = (page - 1) * page_size
 
-            query = self.supabase.table("files").select("*").eq("user_id", str(user_id))
+            query = (
+                self.supabase.table("files")
+                .select(
+                    "id, user_id, filename, file_size, storage_path, thumbnail_url, has_thumbnail, uploaded_at"
+                )
+                .eq("user_id", str(user_id))
+            )
 
             # Apply sorting
             if sort_order.lower() == "asc":
@@ -188,3 +200,17 @@ class FileService:
 
     def generate_storage_path(self, user_id: UUID, file_id: UUID, filename: str) -> str:
         return f"{user_id}/{file_id}/{filename}"
+
+    async def update_thumbnail_metadata(
+        self, file_id: UUID, has_thumbnail: bool, thumbnail_url: str = None
+    ) -> None:
+        update_data = {"has_thumbnail": has_thumbnail}
+        if thumbnail_url:
+            update_data["thumbnail_url"] = thumbnail_url
+
+        response = (
+            self.supabase.table("files")
+            .update(update_data)
+            .eq("id", str(file_id))
+            .execute()
+        )

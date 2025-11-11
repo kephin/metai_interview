@@ -1,4 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Query,
+    BackgroundTasks,
+)
 from fastapi.responses import RedirectResponse
 from supabase import Client
 from uuid import UUID, uuid4
@@ -10,14 +18,46 @@ from models.auth import User
 from models.file import FileMetadata, FileListResponse, FileUploadResponse
 from services.file_service import FileService
 from services.storage_service import StorageService
+from services.thumbnail_service import generate_thumbnail
 
 router = APIRouter(prefix="/files", tags=["files"])
 logger = logging.getLogger(__name__)
 
 
+async def _generate_and_upload_thumbnail(
+    file_content: bytes,
+    file_id: UUID,
+    user_id: str,
+    storage_service: StorageService,
+    file_service: FileService,
+) -> None:
+    try:
+        thumbnail_bytes = await generate_thumbnail(file_content)
+
+        # Upload thumbnail to storage
+        thumbnail_path = await storage_service.upload_thumbnail(
+            user_id=user_id,
+            file_id=str(file_id),
+            thumbnail_data=thumbnail_bytes,
+        )
+
+        await file_service.update_thumbnail_metadata(
+            file_id=file_id,
+            has_thumbnail=True,
+            thumbnail_url=thumbnail_path,
+        )
+
+    except Exception as e:
+        await file_service.update_thumbnail_metadata(
+            file_id=file_id,
+            has_thumbnail=False,
+        )
+
+
 @router.post("/upload", response_model=FileUploadResponse, status_code=201)
 async def upload_file(
     file: Annotated[UploadFile, File()],
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     supabase: Client = Depends(get_supabase_client),
 ):
@@ -60,7 +100,6 @@ async def upload_file(
                 },
             )
 
-        # Uploads to Supabase Storage
         file_id = uuid4()
         storage_path = file_service.generate_storage_path(
             user_id=UUID(current_user.id),
@@ -74,15 +113,34 @@ async def upload_file(
             content_type=file.content_type,
         )
 
-        # Creates metadata record
+        # Create metadata record
         file_metadata = await file_service.create_file_metadata(
             user_id=UUID(current_user.id),
+            file_id=file_id,
             filename=sanitized_filename,
             file_size=file_size,
             storage_path=storage_path,
         )
 
-        # TODO: Trigger async thumbnail generation for images
+        is_image = file_service.is_image_file(sanitized_filename)
+        logger.info(f"File '{sanitized_filename}' is_image: {is_image}")
+
+        if is_image:
+            logger.info(
+                f"Adding thumbnail generation task to background_tasks for file {file_id}"
+            )
+            background_tasks.add_task(
+                _generate_and_upload_thumbnail,
+                file_content=file_content,
+                file_id=file_id,
+                user_id=current_user.id,
+                storage_service=storage_service,
+                file_service=file_service,
+            )
+        else:
+            logger.info(
+                f"Skipping thumbnail generation for non-image file: {sanitized_filename}"
+            )
 
         return FileUploadResponse(
             file=FileMetadata(**file_metadata), message="File uploaded successfully"
@@ -107,6 +165,7 @@ async def list_files(
     supabase: Client = Depends(get_supabase_client),
 ):
     file_service = FileService(supabase)
+    storage_service = StorageService(supabase)
 
     try:
         files, total_count = await file_service.list_user_files(
@@ -119,6 +178,30 @@ async def list_files(
         total_pages = (
             (total_count + page_size - 1) // page_size if total_count > 0 else 0
         )
+
+        # Generate pre-signed URLs for thumbnails
+        for file in files:
+            if file.get("has_thumbnail"):
+                thumbnail_path = file.get("thumbnail_url")
+                if not thumbnail_path:
+                    storage_path = file["storage_path"]
+                    thumbnail_path = storage_path.rsplit("/", 1)[0] + "/thumbnail.webp"
+
+                try:
+                    signed_url = await storage_service.generate_signed_url(
+                        file_path=thumbnail_path,
+                        expiry_seconds=3600,  # 1 hour
+                    )
+                    file["thumbnail_url"] = signed_url
+                except Exception as e:
+                    logger.error(
+                        f"Failed to generate thumbnail URL for file {file['id']}: {str(e)}"
+                    )
+                    file["thumbnail_url"] = None
+            else:
+                file["thumbnail_url"] = None
+
+        # Convert to FileMetadata objects
         file_metadata_list = [FileMetadata(**f) for f in files]
 
         return FileListResponse(
@@ -146,21 +229,19 @@ async def delete_file(
     storage_service = StorageService(supabase)
 
     try:
-        # Verify ownership
         file_metadata = await file_service.get_file_metadata(
             file_id=file_id, user_id=UUID(current_user.id)
         )
         if not file_metadata:
             raise HTTPException(status_code=404, detail="File not found")
 
-        # Delete from storage
         storage_path = file_metadata["storage_path"]
         try:
             await storage_service.delete_file(storage_path)
         except Exception as e:
             logger.error(f"Error deleting file from storage: {str(e)}")
 
-        # Delete thumbnail
+        # Delete thumbnail if it exists
         if file_metadata.get("has_thumbnail"):
             thumbnail_path = storage_path.rsplit("/", 1)[0] + "/thumbnail.webp"
             try:
@@ -194,7 +275,7 @@ async def download_file(
     storage_service = StorageService(supabase)
 
     try:
-        # Verify ownership
+        # Get file metadata to verify ownership
         file_metadata = await file_service.get_file_metadata(
             file_id=file_id, user_id=UUID(current_user.id)
         )

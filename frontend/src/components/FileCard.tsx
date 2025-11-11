@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   type FileMetadata,
   formatFileSize,
@@ -17,8 +17,35 @@ export interface FileCardProps {
 export function FileCard({ file, onDeleted }: FileCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [thumbnailError, setThumbnailError] = useState(false);
+  const [shouldLoadThumbnail, setShouldLoadThumbnail] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   const deleteFile = useDeleteFile();
   const downloadFile = useDownloadFile();
+
+  useEffect(() => {
+    if (!cardRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setShouldLoadThumbnail(true);
+            observer.disconnect();
+          }
+        });
+      },
+      {
+        root: null,
+        rootMargin: "50px",
+        threshold: 0.1,
+      }
+    );
+
+    observer.observe(cardRef.current);
+
+    return () => observer.disconnect();
+  }, []);
 
   const handleDelete = async () => {
     try {
@@ -47,17 +74,25 @@ export function FileCard({ file, onDeleted }: FileCardProps) {
 
   return (
     <>
-      <div className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
+      <div
+        ref={cardRef}
+        className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow bg-white"
+      >
         <div className="flex items-start gap-4">
           <div className="flex-shrink-0 w-16 h-16 bg-gray-100 rounded flex items-center justify-center">
-            {showImage && file.thumbnail_url ? (
+            {showImage &&
+            file.thumbnail_url &&
+            shouldLoadThumbnail &&
+            !thumbnailError ? (
               <img
                 src={file.thumbnail_url}
                 alt={file.filename}
                 className="w-full h-full object-cover rounded"
                 loading="lazy"
+                onError={() => setThumbnailError(true)}
               />
-            ) : showImage && file.has_thumbnail === false ? (
+            ) : showImage &&
+              (file.has_thumbnail === false || thumbnailError) ? (
               <FileIcon type="image" />
             ) : (
               <FileIcon type={getFileType(file.filename)} />
